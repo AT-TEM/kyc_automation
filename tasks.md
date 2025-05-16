@@ -4,6 +4,36 @@
 
 ---
 
+kyc_automation/
+├── docs/
+│   ├── prd.md              # Product Requirements
+│   └── tasks.md            # Granular task breakdown
+├── src/
+│   └── kyc_service/
+│       ├── __init__.py
+│       ├── main.py         # Flask (or FastAPI) app exposing /webhook
+│       ├── config.py       # Env & settings loader
+│       ├── abn_lookup.py   # ABN + name‑search client
+│       ├── licence_checks.py
+│       ├── decision_engine.py
+│       ├── evidence_capture.py
+│       ├── hubspot_client.py
+│       ├── cli.py          # Interactive picker when ABN missing
+│       └── utils/
+│           ├── __init__.py
+│           └── logging_config.py
+├── docker/
+│   ├── Dockerfile
+│   └── entrypoint.sh       # Starts gunicorn or uvicorn
+├── tests/
+│   ├── conftest.py
+│   └── test_decision_engine.py
+├── .env.example            # Template env vars
+├── docker-compose.yml      # One‑liner service definition (optional)
+├── requirements.txt        # Pinned Python deps
+├── .gitignore
+└── README.md
+
 ### Legend
 
 * **T‑X** = Task • **ST‑X.Y** = Sub‑task • Dependencies list upstream IDs
