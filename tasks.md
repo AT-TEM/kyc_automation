@@ -1,197 +1,106 @@
-# Task Breakdown & Developer Guide – KYC Automation (Phase 1)
+# Task Breakdown: KYC Automation (Phase 1 – Local Docker)
 
 > **Repository**: [https://github.com/AT-TEM/kyc\_automation](https://github.com/AT-TEM/kyc_automation)
 
 ---
 
-## 0. Repository & Documentation Structure
+### Legend
 
-```
-kyc_automation/
-├── docs/
-│   ├── prd.md              # Product Requirements (already drafted)
-│   └── tasks.md            # THIS document – tasks + step‑by‑step guide
-├── src/                    # Python packages & entry points
-│   ├── kyc_service/
-│   │   ├── __init__.py
-│   │   ├── abn_lookup.py
-│   │   ├── licence_checks.py
-│   │   ├── decision_engine.py
-│   │   ├── evidence_collector.py
-│   │   ├── hubspot_writer.py
-│   │   └── lambda_handler.py
-│   └── tests/
-│       ├── test_abn_lookup.py
-│       ├── test_licence_checks.py
-│       └── test_decision_engine.py
-├── requirements.txt        # Pinned deps (requests, boto3, playwright‑stealth, hubspot‑api‑client,…)
-├── .env.example            # Template for secrets
-├── deploy_lambda.sh        # One‑click zip + upload script
-└── README.md               # Quick‑start, env setup, deploy steps
-```
-
-**How to document the PRD**
-
-1. Commit the existing `prd.md` into `docs/` (`git add docs/prd.md`).
-2. Commit this `tasks.md` in the same folder.
-3. Reference both from `README.md`:
-
-   ```markdown
-   ## Project Docs
-   * [Product Requirements](docs/prd.md)
-   * [Task Breakdown & Guide](docs/tasks.md)
-   ```
-
-Push to `main` or a protected branch after PR review.
+* **T‑X** = Task • **ST‑X.Y** = Sub‑task • Dependencies list upstream IDs
 
 ---
 
-## 1. High‑Level Task List (mirrors PRD milestones)
+## Epic 1 – Project Bootstrap & Repository
 
-| ID      | Epic                  | Description                                                             | Deliverable                   |
-| ------- | --------------------- | ----------------------------------------------------------------------- | ----------------------------- |
-| **T‑1** | Setup                 | AWS account, S3 `kyc-evidence`, IAM roles, HS private app               | AWS README, secrets in `.env` |
-| **T‑2** | Public API Aggregator | `abn_lookup.py`, `licence_checks.py` with retry + caching               | Green tests                   |
-| **T‑3** | Decision Engine       | `decision_engine.py` + unit tests for exemption logic                   | Coverage ≥ 90 %               |
-| **T‑4** | Evidence Collector    | Headless scrape + screenshot + S3 upload utilities                      | PNG/PDF/JSON in bucket        |
-| **T‑5** | HubSpot Writer        | Upsert custom props + timeline note with signed URLs                    | Note preview screenshot       |
-| **T‑6** | Lambda Wrapper        | `lambda_handler.py` orchestrates T‑2→T‑5; deploy via `deploy_lambda.sh` | Live webhook endpoint         |
-| **T‑7** | (Opt.) GPT Summary    | `gpt_summary.py`; add to handler feature flag                           | Readable paragraph in HS      |
-| **T‑8** | End‑to‑End Tests      | Mock HS webhook, sample ABNs                                            | Test report                   |
-| **T‑9** | Roll‑out & Docs       | README, demo GIF, knowledge‑base article                                | Completed checklist           |
-
-> **Tip:** create a GitHub Project board mapping these task IDs to issues.
+| ID      | Title                 | Sub‑tasks                                                                                                                                                                                                                                                                                                     | Dependencies | Deliverable                           |
+| ------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ------------------------------------- |
+| **T‑1** | Initialise repo ✅     | 1. ST‑1.1 Create GitHub skeleton (README, MIT LICENSE, `.gitignore`, `pre‑commit`) <br>2. ST‑1.2 Add `docs/` folder; commit `prd.md` & `tasks.md`                                                                                                                                                             | —            | Repo scaffold pushed to `main`        |
+| **T‑2** | Local dev environment | 1. ST‑2.1 `requirements.txt` with pinned deps (`fastapi`, `uvicorn`, `requests`, `playwright`, `hubspot‑api‑client`, `python‑dotenv`, `pytest`, `ruff`, `black`) <br>2. ST‑2.2 `Makefile` targets: `venv`, `docker-build`, `docker-run`, `test`, `lint` <br>3. ST‑2.3 `.env.example` with placeholder secrets | T‑1          | `make test` runs green on fresh clone |
 
 ---
 
-## 2. Step‑by‑Step Guide
+## Epic 2 – Public Data Aggregator
 
-### 2.1 Local Setup
-
-1. **Clone** the repo:
-
-   ```bash
-   git clone https://github.com/AT-TEM/kyc_automation.git
-   cd kyc_automation
-   git checkout -b phase1-automation
-   ```
-2. **Python env** (3.11 recommended):
-
-   ```bash
-   python -m venv .venv && source .venv/bin/activate
-   pip install --upgrade pip
-   pip install -r requirements.txt
-   ```
-3. **Secrets**: copy `.env.example` ➜ `.env` and fill in:
-
-   ```bash
-   HUBSPOT_PRIVATE_APP_TOKEN=...
-   ABN_GUID=...
-   S3_BUCKET=kyc-evidence
-   AWS_REGION=ap-southeast-2
-   OPENAI_API_KEY=...   # optional
-   ```
-
-### 2.2 AWS & HubSpot
-
-1. **S3 bucket** `kyc-evidence` (Sydney region) with default encryption.
-2. **IAM role** `kyc-lambda-role` → policies: `AWSLambdaBasicExecutionRole`, S3 read/write.
-3. **Lambda function** `kycService` runtime Python 3.11; set env vars; upload via `deploy_lambda.sh`.
-4. **HubSpot Private App** → CRM scope; add **Webhook**:
-
-   * Trigger: *Ticket created* OR *`abn_number` property updated*.
-   * URL: Lambda HTTPS endpoint.
-
-### 2.3 Coding with Cursor – Prompt Templates
-
-Copy‑paste these into Cursor to generate starter code.
-
-> **Prompt A – ABN Lookup Client**
->
-> ```
-> Using `requests`, create a function `lookup_abn(abn: str, guid: str) -> dict` that
-> 1) calls the ABR SOAP/JSON service with retries (back‑off 0.5,1,2 s),
-> 2) parses active status, entity name, and returns the full JSON.
-> Include unit tests with pytest + pytest‑vcr.
-> ```
-
-> **Prompt B – Licence & Listing Checks**
->
-> ```
-> Write async functions to verify if an entity (ABN + name) is:
-> • AFSL‑licensed (ASIC Professional Register…)
-> • ASX‑listed (download daily CSV; cache for 24 h)
-> • Holds APRA or ABLIS licence (public JSON endpoints)
-> Return a `LicenceStatus` dataclass.
-> Provide mocking tests.
-> ```
-
-> **Prompt C – Decision Engine Logic**
->
-> ```
-> Encode simplified‑KYC rules: skip UBO if any of licence/listing flags true.
-> Accept `LicenceStatus`, output `Decision(rationale:str, simplified:bool)`.
-> Include table‑driven tests covering all branches.
-> ```
-
-> **Prompt D – Evidence Collector**
->
-> ```
-> Build `EvidenceCollector` that
-> • Saves ABN JSON → S3 as `<ticket>/<abn>/abn.json`.
-> • Uses Playwright headless to screenshot AFSL or ASX page (full page PNG).
-> • Converts HTML to PDF if needed.
-> • Returns dict of signed URLs.
-> Use moto‑s3 in tests.
-> ```
-
-> **Prompt E – HubSpot Writer**
->
-> ```
-> Implement `HubSpotClient.write_note(ticket_id:int, decision:Decision, files:dict)`.
-> Use `hubspot-api-client` SDK.
-> ```
-
-> **Prompt F – Lambda Orchestrator**
->
-> ```
-> Glue components: receive webhook JSON, parse ticket & ABN,
-> run lookup → licence checks → decision → evidence → write HS note.
-> Return 200/400/500 accordingly.
-> Add logging & basic metrics.
-> ```
-
-### 2.4 Deployment
-
-1. `bash deploy_lambda.sh` – zips `src/` + deps layer, updates Lambda, deploys.
-2. Run test webhook (sample payload in `scripts/sample_ticket.json`).
-3. Verify note + evidence URLs appear in test HubSpot ticket.
-
-### 2.5 CI / CD (Optional)
-
-* Configure GitHub Action:
-
-  * steps: `pip install -r requirements.txt`, `pytest`, zip artefact, deploy on `main`.
+| ID      | Title                    | Sub‑tasks                                                                                                                                                                                                                                                                   | Dependencies | Deliverable                     |
+| ------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ------------------------------- |
+| **T‑3** | ABN Lookup Client        | 1. ST‑3.1 `lookup_by_abn(abn:str,guid:str)->dict` (retry w/ expo back‑off) <br>2. ST‑3.2 `search_by_name(name:str,guid:str)->list[dict]` returns possible entities <br>3. ST‑3.3 Unit tests w/ pytest‑vcr                                                                   | T‑2          | `src/kyc_service/abn_lookup.py` |
+| **T‑4** | Licence & Listing Checks | 1. ST‑4.1 ASIC AFSL scraper/API – given ABN **or** entity name <br>2. ST‑4.2 ASX listing check – daily CSV; cache 24 h inside container volume <br>3. ST‑4.3 APRA / ABLIS licence endpoints <br>4. ST‑4.4 `LicenceStatus` dataclass aggregation <br>5. ST‑4.5 Tests (respx) | T‑3          | `licence_checks.py`             |
 
 ---
 
-## 3. Coding Conventions & Quality Gates
+## Epic 3 – Decision Engine
 
-* **Black + Ruff** enforced via pre‑commit.
-* **Pytest** with coverage ≥ 80 %.
-* **Type hints** (mypy strict) in `src/`.
-* **Retry logic**: use `tenacity` with jitter.
-* **Secrets** never committed.
+| ID      | Title                       | Sub‑tasks                                                                                                                                                                                               | Dependencies | Deliverable          |
+| ------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | -------------------- |
+| **T‑5** | Encode simplified‑KYC rules | 1. ST‑5.1 `Decision` dataclass (`simplified`, `rationale`, `checks`) <br>2. ST‑5.2 `apply_rules()` includes path when ABN absent but licences/listings show legitimacy <br>3. ST‑5.3 Table‑driven tests | T‑3, T‑4     | `decision_engine.py` |
 
 ---
 
-## 4. Definition of Done
+## Epic 4 – Evidence Capture & Storage (Local)
 
-1. Lambda passes end‑to‑end tests for active & exempt ABNs.
-2. HubSpot ticket shows decision note + evidence links.
-3. README + docs up to date.
-4. Average analyst time reduced to target in pilot run (track manually for 1 week).
+| ID      | Title              | Sub‑tasks                                                                                                                                                                                                                                                                                              | Dependencies | Deliverable                                          |
+| ------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------ | ---------------------------------------------------- |
+| **T‑6** | Evidence Collector | 1. ST‑6.1 Create local mount `evidence/` (Docker volume bind) <br>2. ST‑6.2 `save_abn_json()` writes `abn.json` <br>3. ST‑6.3 `capture_screenshot(url,path)` via Playwright – AFSL & ASX pages <br>4. ST‑6.4 Return filesystem paths; later mapped to HS links <br>5. ST‑6.5 Tests (pytest‑playwright) | T‑3, T‑4     | `evidence_collector.py`; sample files in `evidence/` |
 
 ---
 
-> **Next Phase Preview**: integrate Equifax + Stack Go once Phase 1 stabilises.
+## Epic 5 – HubSpot Integration
+
+| ID      | Title                         | Sub‑tasks                                                                                                                                                                           | Dependencies | Deliverable                                    |
+| ------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ---------------------------------------------- |
+| **T‑7** | HubSpot Note Writer           | 1. ST‑7.1 Upsert custom properties (`is_simplified_kyc`, `kyc_rationale`, `evidence_links`) <br>2. ST‑7.2 Attach timeline note (Markdown) <br>3. ST‑7.3 Handle re‑runs idempotently | T‑5, T‑6     | `hubspot_writer.py`                            |
+| **T‑8** | HubSpot Trigger Configuration | 1. ST‑8.1 Create/modify Workflow: pipeline **KYC Flow**, stage **New Customer (AFSL Triggered)** → call webhook <br>2. ST‑8.2 Generate signed webhook secret; store in `.env`       | T‑1          | Workflow live, test ticket hits local endpoint |
+
+---
+
+## Epic 6 – Local Docker Service & CLI
+
+| ID       | Title                       | Sub‑tasks                                                                                                                                                                                                                                                                                                                                                                                                                        | Dependencies | Deliverable                        |
+| -------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ---------------------------------- |
+| **T‑9**  | FastAPI Webhook Server      | 1. ST‑9.1 `/webhook` POST validates HS signature <br>2. ST‑9.2 Parse ticket JSON; fetch ABN property & ticket name <br>3. ST‑9.3 If ABN **missing**, call `search_by_name`; present CLI selection (TUI via `questionary`) when running in interactive mode; else pick first match in non‑interactive mode <br>4. ST‑9.4 Call orchestrator (lookup → licences → decision → evidence → HS write) <br>5. ST‑9.5 Return 200/4xx JSON | T‑3‑T‑7      | `server.py`                        |
+| **T‑10** | Dockerfile & docker‑compose | 1. ST‑10.1 Multi‑stage Dockerfile (slim python → prod) <br>2. ST‑10.2 Expose `PORT` 8000; CMD `uvicorn server:app` <br>3. ST‑10.3 Bind‑mount `./evidence` to `/app/evidence` <br>4. ST‑10.4 `docker-compose.yml` with env‑file `.env`, restart : unless‑stopped                                                                                                                                                                  | T‑2, T‑9     | `Dockerfile`, `docker-compose.yml` |
+| **T‑11** | Local Tunnel for Webhooks   | 1. ST‑11.1 Instruction: run `ngrok http 8000` (or Cloudflare tunnel) <br>2. ST‑11.2 Update HS webhook URL with tunnel address (script or manual)                                                                                                                                                                                                                                                                                 | T‑10         | Developer guide section updated    |
+
+---
+
+## Epic 7 – Testing & CI
+
+| ID       | Title                      | Sub‑tasks                                                                                                                                                                                | Dependencies | Deliverable                |
+| -------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | -------------------------- |
+| **T‑12** | Integration tests (docker) | 1. ST‑12.1 `pytest -m e2e` spins `docker‑compose up -d` <br>2. ST‑12.2 Send sample webhook to `localhost:8000/webhook` <br>3. ST‑12.3 Assert HS mock received note, evidence files exist | T‑10         | `tests/test_e2e.py`        |
+| **T‑13** | GitHub Actions CI          | 1. ST‑13.1 Workflow: lint → unit tests → build docker image <br>2. ST‑13.2 Publish to GHCR `ghcr.io/at-tem/kyc_automation` <br>3. ST‑13.3 Optionally push `latest` tag on `main`         | T‑12         | `.github/workflows/ci.yml` |
+
+---
+
+## Epic 8 – Documentation & Roll‑out
+
+| ID       | Title              | Sub‑tasks                                                                                                                                                                               | Dependencies | Deliverable            |
+| -------- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ---------------------- |
+| **T‑14** | Dev & Ops Runbooks | 1. ST‑14.1 README architecture Mermaid diagram <br>2. ST‑14.2 `docs/local_setup.md` – Docker build/run, tunnel setup, env vars <br>3. ST‑14.3 `docs/troubleshooting.md` – common errors | T‑11         | Docs published         |
+| **T‑15** | Pilot & Metrics    | 1. ST‑15.1 Run local service for a week <br>2. ST‑15.2 Collect manual vs auto processing times <br>3. ST‑15.3 Review results; plan Phase 2                                              | T‑14         | `docs/pilot_report.md` |
+
+---
+
+## Appendix – Cursor Prompt Snippets (Quick‑copy)
+
+| Component          | Prompt ID   |
+| ------------------ | ----------- |
+| ABN Lookup         | `prompt‑A`  |
+| Name Search        | `prompt‑A2` |
+| Licence Checks     | `prompt‑B`  |
+| Decision Engine    | `prompt‑C`  |
+| Evidence Collector | `prompt‑D`  |
+| FastAPI Server     | `prompt‑E`  |
+| Dockerfile         | `prompt‑F`  |
+
+*Full templates remain in the earlier Developer Guide; copy‑paste as needed.*
+
+---
+
+### Definition of Done (Phase 1 ‑ Local Docker)
+
+* Docker container builds locally with one command; service reachable at `localhost:8000`.
+* HubSpot tickets in stage **New Customer (AFSL Triggered)** auto‑annotated with decision + evidence file paths/links.
+* Interactive CLI path resolves tickets w/o ABN.
+* ≥ 50 % analyst time‑saving demonstrated in pilot.
+* Test coverage ≥ 80 %; CI pipeline green.
