@@ -1,3 +1,3 @@
 ## Project Docs
-* [Product Requirements](docs/prd.md)
-* [Task Breakdown & Guide](docs/tasks.md)
+* [Product Requirements](/prd.md)
+* [Task Breakdown & Guide](/tasks.md)
