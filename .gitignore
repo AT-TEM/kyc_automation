@@ -1,0 +1,4 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+kyc_auto/__pycache__/
